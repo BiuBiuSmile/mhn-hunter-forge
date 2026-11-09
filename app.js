@@ -106,10 +106,81 @@ $('close-picker').onclick=()=>dialog.close();
 $('unequip').onclick=()=>choose('');
 $('choices').onclick=e=>{const btn=e.target.closest('[data-value]');if(btn)choose(btn.dataset.value)};
 $('name').oninput=e=>build.name=e.target.value;
-$('goals').innerHTML=[0,1].map((_,j)=>'<div class="goal"><label for="goal'+j+'">優先 '+(j+1)+'</label><select id="goal'+j+'">'+option('','不指定','')+allSkills.map(s=>option(s,s,j===0?'攻擊':'')).join('')+'</select><select aria-label="目標點數 '+(j+1)+'" id="level'+j+'">'+[1,2,3,4,5].map(n=>option(n,n+' 點',3)).join('')+'</select></div>').join('');
+const goalRows = [0, 1];
+function goalRow(index) {
+  const title = index === 0 ? '主要技能' : '第二優先技能';
+  const points = [1, 2, 3, 4, 5].map(n =>
+    `<label><input type="radio" name="points${index}" value="${n}" ${n === 3 ? 'checked' : ''}><span>${n}</span></label>`
+  ).join('');
+  return `<section class="target" id="target${index}" ${index ? 'hidden' : ''}>
+    <div class="target-head"><label for="goal${index}">${title}</label>
+    ${index ? '<button id="remove-goal" type="button">移除</button>' : ''}</div>
+    <input id="goal${index}" class="skill-search" type="search" autocomplete="off" placeholder="輸入技能關鍵字，例如「火」">
+    <div id="matches${index}" class="matches" aria-label="符合的技能"></div>
+    <fieldset class="point-control"><legend>${title}目標點數</legend><span aria-hidden="true">目標點數</span>${points}</fieldset>
+  </section>`;
+}
+$('goals').innerHTML = goalRows.map(goalRow).join('') + '<button id="add-goal" type="button">＋ 加入第二個技能</button>';
+function renderMatches(index) {
+  const query = $('goal'+index).value.trim().toLocaleLowerCase();
+  const other = $('target1').hidden ? '' : $('goal'+(1-index)).value.trim();
+  const candidates = query ? allSkills.filter(skill => skill.toLocaleLowerCase().includes(query)) : ['攻擊','看破','連擊','弱點特效'];
+  const matches = candidates.filter(skill => skill !== other);
+  $('matches'+index).innerHTML = matches.length ? matches.map(skill =>
+    `<button type="button" data-skill="${esc(skill)}" aria-pressed="${skill === query}">${esc(skill)}</button>`
+  ).join('') : '<span role="status">找不到相符技能，請換個關鍵字。</span>';
+}
+function refreshGoals() {
+  for (const index of goalRows) renderMatches(index);
+}
+for (const index of goalRows) {
+  const input = $('goal'+index);
+  const results = $('matches'+index);
+  function pick(skill) {
+    input.value = skill;
+    refreshGoals();
+    input.focus();
+    input.select();
+  }
+  input.oninput = refreshGoals;
+  input.onkeydown = event => {
+    if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+    const matches = results.querySelectorAll('button');
+    if (matches.length === 1) { event.preventDefault(); pick(matches[0].dataset.skill); }
+  };
+  results.onclick = event => {
+    const button = event.target.closest('[data-skill]');
+    if (button) pick(button.dataset.skill);
+  };
+}
+$('add-goal').onclick = () => {
+  $('target1').hidden = false;
+  $('add-goal').hidden = true;
+  refreshGoals();
+  $('goal1').focus();
+};
+$('remove-goal').onclick = () => {
+  $('goal1').value = '';
+  $('target1').hidden = true;
+  $('add-goal').hidden = false;
+  refreshGoals();
+  $('add-goal').focus();
+};
+refreshGoals();
 function optimize(){
-  const goals=[0,1].map(j=>({s:$('goal'+j).value,n:+$('level'+j).value})).filter(g=>g.s);
-  if(!goals.length || new Set(goals.map(g=>g.s)).size!==goals.length){notice('請指定一至兩項不同的目標技能');return}
+  const goals = [];
+  for (const index of goalRows) {
+    if ($('target'+index).hidden) continue;
+    const input = $('goal'+index);
+    const skill = input.value.trim();
+    if (!allSkills.includes(skill) || goals.some(goal => goal.s === skill)) {
+      notice('請從搜尋結果選擇' + (index ? '另一個技能' : '主要技能'));
+      input.focus();
+      return;
+    }
+    goals.push({s:skill, n:Number(document.querySelector('input[name="points'+index+'"]:checked').value)});
+  }
+
   const base=empty();base.name=build.name;if(build.gear.weapon)base.gear.weapon=build.gear.weapon;
   let states=[base];
   const score=b=>{const t=totals(b);return goals.map(g=>Math.min(g.n,t.skills[g.s]||0))};
